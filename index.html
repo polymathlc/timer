@@ -1,0 +1,1780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Polymath Recording Timestamp Tracker</title>
+
+<!-- Roboto for the "?" glyph routing (Century Gothic's ? is ugly) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+
+<!-- pdf.js for extracting the question list from an uploaded exam paper PDF -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<style>
+  /* ============================================================
+     PolymathSans virtual font — routes ONLY the "?" glyph (U+003F)
+     to Roboto, everything else falls through to Century Gothic.
+     ============================================================ */
+  @font-face {
+    font-family: 'PolymathSans';
+    src: local('Roboto'), local('Roboto-Regular');
+    unicode-range: U+003F;
+  }
+
+  :root {
+    /* === Surface & Background === */
+    --bg-primary: #FFFFFF;
+    --bg-secondary: #FAFAFA;
+    --bg-tertiary: #F3F3F0;
+    --border-subtle: #E8E8E4;
+    --border-medium: #D4D4CF;
+
+    /* === Text === */
+    --text-primary: #1A1A1A;
+    --text-secondary: #5C5C5C;
+    --text-tertiary: #8A8A8A;
+    --text-inverse: #FFFFFF;
+
+    /* === Accent: General / operational tool → soft orange === */
+    --accent-light: #FFE0B2;
+    --accent-base: #FFB74D;
+    --accent-dark: #FFA726;
+    --accent-bg: #FFF3E0;
+
+    /* === Semantic === */
+    --success-base: #81C784;
+    --success-bg: #F1F8E9;
+    --danger-base: #E57373;
+    --danger-bg: #FFEBEE;
+
+    /* === Shadows === */
+    --shadow-xs: 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+    --shadow-md: 0 2px 4px rgba(0,0,0,0.05), 0 6px 20px rgba(0,0,0,0.08);
+    --shadow-lg: 0 4px 6px rgba(0,0,0,0.05), 0 10px 30px rgba(0,0,0,0.1);
+    --shadow-button: 0 1px 2px rgba(0,0,0,0.05), 0 2px 8px rgba(0,0,0,0.08);
+    --shadow-button-hover: 0 2px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.12);
+
+    /* === Spacing Scale === */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 40px;
+    --space-2xl: 64px;
+
+    /* === Border Radius === */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    --radius-full: 999px;
+
+    /* === Typography === */
+    --font-family: 'PolymathSans', 'Century Gothic', CenturyGothic, AppleGothic, 'Roboto', sans-serif;
+    --font-size-xs: 0.75rem;
+    --font-size-sm: 0.875rem;
+    --font-size-base: 1rem;
+    --font-size-md: 1.125rem;
+    --font-size-lg: 1.5rem;
+    --font-size-xl: 2rem;
+    --font-size-2xl: 2.5rem;
+    --line-height-tight: 1.2;
+    --line-height-normal: 1.6;
+
+    /* === Transitions === */
+    --transition-fast: 0.15s ease;
+    --transition-base: 0.25s ease;
+    --transition-slow: 0.4s ease;
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html {
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    font-family: var(--font-family);
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    line-height: var(--line-height-normal);
+    min-height: 100vh;
+  }
+
+  img { max-width: 100%; display: block; }
+  input, button, select, textarea { font-family: inherit; }
+  button { cursor: pointer; }
+
+  /* ============================================================
+     Header
+     ============================================================ */
+  .polymath-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-md) var(--space-lg);
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-primary);
+    position: relative;
+  }
+
+  .polymath-logo {
+    height: 58px;
+    width: auto;
+    object-fit: contain;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+
+  .icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    box-shadow: var(--shadow-button);
+    transition: box-shadow var(--transition-base), transform var(--transition-base), background var(--transition-base);
+  }
+  .icon-button:hover {
+    box-shadow: var(--shadow-button-hover);
+    transform: translateY(-1px);
+    background: var(--bg-secondary);
+  }
+  .icon-button:active { transform: translateY(0.5px); box-shadow: var(--shadow-xs); }
+  .icon-button svg { width: 20px; height: 20px; }
+
+  /* ============================================================
+     Layout
+     ============================================================ */
+  .page-main {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: var(--space-xl) var(--space-lg) calc(var(--space-2xl) + 40px);
+    animation: pageFadeIn 0.5s ease both;
+  }
+
+  @keyframes pageFadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .stagger-child { animation: childRise 0.45s ease both; }
+  .stagger-child:nth-child(1) { animation-delay: 0.05s; }
+  .stagger-child:nth-child(2) { animation-delay: 0.12s; }
+  .stagger-child:nth-child(3) { animation-delay: 0.19s; }
+  .stagger-child:nth-child(4) { animation-delay: 0.26s; }
+
+  @keyframes childRise {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .page-title {
+    font-size: var(--font-size-xl);
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    text-align: center;
+    margin-bottom: var(--space-sm);
+  }
+
+  .page-subtitle {
+    font-size: var(--font-size-md);
+    font-weight: 400;
+    color: var(--text-secondary);
+    text-align: center;
+    margin-bottom: var(--space-xl);
+    max-width: 640px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .workspace-grid {
+    display: grid;
+    grid-template-columns: 420px 1fr;
+    gap: var(--space-lg);
+    align-items: start;
+  }
+
+  @media (max-width: 900px) {
+    .workspace-grid { grid-template-columns: 1fr; }
+  }
+
+  /* ============================================================
+     Cards
+     ============================================================ */
+  .panel-card {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    padding: var(--space-lg);
+    transition: box-shadow var(--transition-base);
+  }
+
+  .panel-card + .panel-card { margin-top: var(--space-lg); }
+
+  .panel-label {
+    font-size: var(--font-size-xs);
+    font-weight: 700;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: var(--space-md);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+  }
+
+  /* ============================================================
+     Timer panel
+     ============================================================ */
+  .timer-display {
+    font-size: 3.4rem;
+    font-weight: 700;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    line-height: var(--line-height-tight);
+    padding: var(--space-md) 0;
+    border-radius: var(--radius-md);
+    transition: color var(--transition-base), background var(--transition-base);
+  }
+  .timer-display.timer-running { color: var(--accent-dark); }
+  .timer-display.timer-pulse { animation: valuePulse 0.35s ease; }
+
+  @keyframes valuePulse {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.04); }
+    100% { transform: scale(1); }
+  }
+
+  .timer-status-line {
+    text-align: center;
+    font-size: var(--font-size-sm);
+    color: var(--text-tertiary);
+    margin-bottom: var(--space-md);
+    min-height: 1.4em;
+  }
+
+  .elapsed-input-row {
+    display: flex;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-md);
+  }
+
+  .elapsed-input {
+    flex: 1;
+    padding: 12px 14px;
+    font-size: var(--font-size-md);
+    font-variant-numeric: tabular-nums;
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    text-align: center;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+  .elapsed-input:focus {
+    outline: none;
+    border-color: var(--accent-base);
+    box-shadow: 0 0 0 3px var(--accent-bg);
+  }
+  .elapsed-input::placeholder { color: var(--text-tertiary); }
+
+  .timer-buttons-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-md);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 18px;
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    box-shadow: var(--shadow-button);
+    transition: box-shadow var(--transition-base), transform var(--transition-base),
+                background var(--transition-base), color var(--transition-base);
+    user-select: none;
+    min-width: 0;
+    white-space: nowrap;
+  }
+  .btn:hover  { box-shadow: var(--shadow-button-hover); transform: translateY(-1px); }
+  .btn:active { transform: translateY(0.5px); box-shadow: var(--shadow-xs); }
+  .btn:disabled { opacity: 0.45; pointer-events: none; }
+
+  .btn-primary { background: var(--accent-base); color: var(--text-primary); }
+  .btn-primary:hover { background: var(--accent-dark); }
+
+  .btn-neutral {
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    border-color: var(--border-medium);
+  }
+  .btn-neutral:hover { background: var(--bg-secondary); }
+
+  .btn-danger-ghost {
+    background: var(--bg-primary);
+    color: var(--danger-base);
+    border-color: var(--border-subtle);
+  }
+  .btn-danger-ghost:hover { background: var(--danger-bg); }
+
+  .btn-clicked { animation: buttonSpring 0.35s var(--ease-spring); }
+  @keyframes buttonSpring {
+    0%   { transform: scale(1); }
+    35%  { transform: scale(0.95); }
+    100% { transform: scale(1); }
+  }
+
+  .nudge-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-xs);
+  }
+  .nudge-button {
+    padding: 8px 4px;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    transition: background var(--transition-fast), transform var(--transition-fast);
+  }
+  .nudge-button:hover { background: var(--accent-bg); transform: translateY(-1px); }
+  .nudge-button:active { transform: translateY(0.5px); }
+
+  .nudge-hint {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    text-align: center;
+    margin-top: var(--space-sm);
+  }
+
+  /* ============================================================
+     Big MARK button
+     ============================================================ */
+  .mark-button {
+    width: 100%;
+    padding: 22px 18px;
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    background: var(--accent-base);
+    color: var(--text-primary);
+    border: none;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    transition: box-shadow var(--transition-base), transform var(--transition-base), background var(--transition-base);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    min-height: 96px;
+    justify-content: center;
+  }
+  .mark-button:hover  { background: var(--accent-dark); box-shadow: var(--shadow-lg); transform: translateY(-2px); }
+  .mark-button:active { transform: translateY(1px); box-shadow: var(--shadow-sm); }
+  .mark-button:disabled { opacity: 0.45; pointer-events: none; }
+  .mark-button .mark-button-sub {
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    color: rgba(26,26,26,0.65);
+  }
+  .mark-button.mark-success { background: var(--success-base); }
+
+  /* ============================================================
+     PDF drop zone
+     ============================================================ */
+  .pdf-drop-zone {
+    border: 2px dashed var(--border-medium);
+    border-radius: var(--radius-md);
+    padding: var(--space-lg);
+    text-align: center;
+    color: var(--text-tertiary);
+    background: var(--bg-secondary);
+    cursor: pointer;
+    transition: border-color var(--transition-base), background var(--transition-base), color var(--transition-base);
+  }
+  .pdf-drop-zone:hover,
+  .pdf-drop-zone.drop-zone-active {
+    border-color: var(--accent-base);
+    background: var(--accent-bg);
+    color: var(--text-secondary);
+  }
+  .pdf-drop-zone .drop-zone-title { font-weight: 600; color: var(--text-secondary); margin-bottom: 2px; }
+  .pdf-drop-zone .drop-zone-sub { font-size: var(--font-size-sm); }
+
+  .pdf-status {
+    margin-top: var(--space-sm);
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    min-height: 1.4em;
+    text-align: center;
+  }
+  .pdf-status.pdf-status-error { color: var(--danger-base); }
+
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid var(--accent-light);
+    border-top-color: var(--accent-dark);
+    border-radius: 50%;
+    animation: spinnerTurn 0.7s linear infinite;
+    vertical-align: -2px;
+    margin-right: 6px;
+  }
+  @keyframes spinnerTurn { to { transform: rotate(360deg); } }
+
+  .manual-add-row {
+    display: flex;
+    gap: var(--space-sm);
+    margin-top: var(--space-md);
+  }
+  .manual-add-input {
+    flex: 1;
+    padding: 10px 12px;
+    font-size: var(--font-size-sm);
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-md);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+  .manual-add-input:focus {
+    outline: none;
+    border-color: var(--accent-base);
+    box-shadow: 0 0 0 3px var(--accent-bg);
+  }
+
+  /* ============================================================
+     Question list
+     ============================================================ */
+  .question-list-panel { min-height: 320px; }
+
+  .question-list-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+  }
+
+  .question-count-chip {
+    font-size: var(--font-size-xs);
+    font-weight: 700;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-full);
+    padding: 3px 10px;
+  }
+
+  .question-list { list-style: none; }
+
+  .question-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: 12px 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    margin-bottom: var(--space-sm);
+    cursor: pointer;
+    transition: border-color var(--transition-base), background var(--transition-base),
+                box-shadow var(--transition-base), transform var(--transition-base);
+    animation: rowScaleIn 0.3s ease both;
+  }
+  @keyframes rowScaleIn {
+    from { opacity: 0; transform: scale(0.97); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  .question-row:hover { box-shadow: var(--shadow-sm); transform: translateY(-1px); }
+
+  .question-row.row-current {
+    border-color: var(--accent-base);
+    background: var(--accent-bg);
+    box-shadow: 0 0 0 3px var(--accent-bg), var(--shadow-sm);
+  }
+
+  .question-row.row-stamped .question-row-number { background: var(--success-base); color: #fff; }
+  .question-row.row-flash { animation: rowStampFlash 0.7s ease; }
+  @keyframes rowStampFlash {
+    0%   { background: var(--success-bg); }
+    100% { background: var(--bg-primary); }
+  }
+  .question-row.row-current.row-flash {
+    animation: rowStampFlashCurrent 0.7s ease;
+  }
+  @keyframes rowStampFlashCurrent {
+    0%   { background: var(--success-bg); }
+    100% { background: var(--accent-bg); }
+  }
+
+  .question-row-number {
+    flex: 0 0 auto;
+    width: 34px; height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-full);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-weight: 700;
+    font-size: var(--font-size-sm);
+    transition: background var(--transition-base), color var(--transition-base);
+  }
+
+  .question-row-body { flex: 1; min-width: 0; }
+
+  .question-row-name {
+    font-weight: 600;
+    font-size: var(--font-size-base);
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .question-row-preview {
+    font-size: var(--font-size-xs);
+    color: var(--text-tertiary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-top: 1px;
+  }
+
+  .question-name-edit-input {
+    width: 100%;
+    padding: 6px 8px;
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    border: 1px solid var(--accent-base);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 0 0 3px var(--accent-bg);
+    outline: none;
+  }
+
+  .question-row-timestamp {
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    font-size: var(--font-size-base);
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    padding: 5px 10px;
+    min-width: 88px;
+    text-align: center;
+    transition: background var(--transition-base), color var(--transition-base);
+  }
+  .question-row-timestamp.timestamp-empty { color: var(--text-tertiary); font-weight: 500; }
+  .question-row-timestamp.timestamp-set   { background: var(--success-bg); color: #33691E; }
+
+  .question-row-actions {
+    flex: 0 0 auto;
+    display: flex;
+    gap: var(--space-xs);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+  }
+  .question-row:hover .question-row-actions,
+  .question-row.row-current .question-row-actions { opacity: 1; }
+
+  .row-action-button {
+    width: 30px; height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-primary);
+    color: var(--text-tertiary);
+    font-size: var(--font-size-xs);
+    transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
+  }
+  .row-action-button:hover { background: var(--bg-secondary); color: var(--text-primary); transform: translateY(-1px); }
+  .row-action-button.row-action-danger:hover { background: var(--danger-bg); color: var(--danger-base); }
+  .row-action-button svg { width: 15px; height: 15px; }
+
+  .empty-list-message {
+    text-align: center;
+    color: var(--text-tertiary);
+    padding: var(--space-xl) var(--space-md);
+    font-size: var(--font-size-base);
+  }
+
+  /* ============================================================
+     Export panel
+     ============================================================ */
+  .export-textarea {
+    width: 100%;
+    min-height: 150px;
+    padding: var(--space-md);
+    font-family: 'Roboto', monospace, sans-serif;
+    font-size: var(--font-size-sm);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    resize: vertical;
+    line-height: 1.7;
+  }
+  .export-textarea:focus { outline: none; border-color: var(--accent-base); }
+
+  .export-toolbar {
+    display: flex;
+    gap: var(--space-sm);
+    margin-top: var(--space-md);
+    flex-wrap: wrap;
+  }
+
+  .format-select {
+    padding: 10px 12px;
+    font-size: var(--font-size-sm);
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+  }
+
+  /* ============================================================
+     Toast
+     ============================================================ */
+  .toast {
+    position: fixed;
+    bottom: 76px;
+    left: 50%;
+    transform: translateX(-50%) translateY(16px);
+    background: var(--text-primary);
+    color: var(--text-inverse);
+    padding: 10px 20px;
+    border-radius: var(--radius-full);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    box-shadow: var(--shadow-lg);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition-base), transform var(--transition-base);
+    z-index: 300;
+    white-space: nowrap;
+  }
+  .toast.toast-visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ============================================================
+     Version badge — visible to all (no admin system in this app)
+     ============================================================ */
+  .version-badge {
+    position: fixed;
+    bottom: 12px;
+    left: 12px;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    color: var(--text-tertiary);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-full);
+    padding: 4px 12px;
+    box-shadow: var(--shadow-xs);
+    z-index: 200;
+    user-select: none;
+  }
+
+  /* ============================================================
+     Print — A4, timestamps table only
+     ============================================================ */
+  @media print {
+    @page { size: A4; margin: 15mm 20mm; }
+
+    body { background: #fff; }
+
+    .header-actions,
+    .pdf-panel,
+    .timer-panel .elapsed-input-row,
+    .timer-panel .timer-buttons-row,
+    .timer-panel .nudge-row,
+    .timer-panel .nudge-hint,
+    .mark-panel,
+    .question-row-actions,
+    .export-toolbar,
+    .manual-add-row,
+    .question-list-toolbar .btn,
+    .version-badge,
+    .toast { display: none !important; }
+
+    .polymath-header { border-bottom: 1px solid #000; }
+    .polymath-logo { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+
+    .workspace-grid { display: block; }
+    .panel-card {
+      box-shadow: none;
+      border: 1px solid #999;
+      page-break-inside: avoid;
+      margin-bottom: 8mm;
+    }
+    .question-row {
+      box-shadow: none;
+      border: 1px solid #bbb;
+      background: #fff !important;
+      page-break-inside: avoid;
+    }
+    .timer-display, .question-row-timestamp { color: #000 !important; background: #fff !important; }
+    body, .question-row-name, .panel-label { color: #000 !important; }
+  }
+</style>
+</head>
+
+<body>
+
+<header class="polymath-header">
+  <img src="https://dl.dropboxusercontent.com/scl/fi/h40yjlyg8ldefwfaa3dib/polymath-logo-sticker.png?rlkey=o1ra4taqy79gt9t8u096v82zj"
+       alt="Polymath Learning Centre"
+       class="polymath-logo" />
+  <div class="header-actions">
+    <button class="icon-button" id="printButton" title="Print timestamp sheet" aria-label="Print">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="6 9 6 2 18 2 18 9"></polyline>
+        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+        <rect x="6" y="14" width="12" height="8"></rect>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<main class="page-main">
+  <h1 class="page-title">Recording Timestamp Tracker</h1>
+  <p class="page-subtitle">
+    Key in how far along your Zoom recording is, start the timer, load your exam paper PDF,
+    then stamp each question as you reach it. Rename, re-stamp or skip around freely.
+  </p>
+
+  <div class="workspace-grid">
+
+    <!-- ======================= LEFT COLUMN ======================= -->
+    <div class="left-column">
+
+      <!-- Timer panel -->
+      <section class="panel-card timer-panel stagger-child">
+        <div class="panel-label">
+          <span>Recording Timer</span>
+          <span id="timerStateChip" class="question-count-chip">Stopped</span>
+        </div>
+
+        <div class="timer-display" id="timerDisplay">00:00:00</div>
+        <div class="timer-status-line" id="timerStatusLine">Enter the current elapsed time of your recording, then press Start.</div>
+
+        <div class="elapsed-input-row">
+          <input type="text" class="elapsed-input" id="elapsedTimeInput"
+                 placeholder="e.g. 12:34 or 1:05:20 or 95"
+                 autocomplete="off" spellcheck="false" />
+        </div>
+
+        <div class="timer-buttons-row">
+          <button class="btn btn-primary" id="startPauseButton">Start Timer</button>
+          <button class="btn btn-neutral" id="setTimeButton">Set Time</button>
+        </div>
+        <div class="timer-buttons-row">
+          <button class="btn btn-danger-ghost" id="resetTimerButton">Reset Timer</button>
+          <button class="btn btn-neutral" id="clearStampsButton">Clear Stamps</button>
+        </div>
+
+        <div class="nudge-row">
+          <button class="nudge-button" data-nudge="-5">−5s</button>
+          <button class="nudge-button" data-nudge="-1">−1s</button>
+          <button class="nudge-button" data-nudge="1">+1s</button>
+          <button class="nudge-button" data-nudge="5">+5s</button>
+        </div>
+        <div class="nudge-hint">Nudge the timer if it drifts from the actual recording.</div>
+      </section>
+
+      <!-- Big mark button -->
+      <section class="panel-card mark-panel stagger-child">
+        <button class="mark-button" id="markButton" disabled>
+          <span id="markButtonMain">Mark Timestamp</span>
+          <span class="mark-button-sub" id="markButtonSub">Load questions to begin</span>
+        </button>
+        <div class="nudge-hint">Shortcut: press <strong>Space</strong> to stamp &nbsp;·&nbsp; <strong>↑ / ↓</strong> to change question</div>
+      </section>
+
+      <!-- PDF panel -->
+      <section class="panel-card pdf-panel stagger-child">
+        <div class="panel-label"><span>Exam Paper PDF</span></div>
+
+        <div class="pdf-drop-zone" id="pdfDropZone">
+          <div class="drop-zone-title">Drop your PDF here, or click to browse</div>
+          <div class="drop-zone-sub">Questions will be detected automatically (Q1, 1., Question 1 …)</div>
+        </div>
+        <input type="file" id="pdfFileInput" accept="application/pdf" style="display:none" />
+        <div class="pdf-status" id="pdfStatusLine"></div>
+
+        <div class="manual-add-row">
+          <input type="text" class="manual-add-input" id="manualAddInput"
+                 placeholder="Or add a question / section manually…" autocomplete="off" />
+          <button class="btn btn-neutral" id="manualAddButton" style="padding:10px 14px">Add</button>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ======================= RIGHT COLUMN ======================= -->
+    <div class="right-column">
+
+      <!-- Question list -->
+      <section class="panel-card question-list-panel stagger-child">
+        <div class="panel-label">
+          <span>Questions</span>
+          <div class="question-list-toolbar">
+            <span class="question-count-chip" id="questionCountChip">0 questions</span>
+            <span class="question-count-chip" id="stampedCountChip">0 stamped</span>
+          </div>
+        </div>
+
+        <ul class="question-list" id="questionList"></ul>
+        <div class="empty-list-message" id="emptyListMessage">
+          No questions yet. Upload the exam paper PDF on the left — or add questions manually —
+          and they will appear here, ready to be stamped.
+        </div>
+      </section>
+
+      <!-- Export -->
+      <section class="panel-card export-panel">
+        <div class="panel-label"><span>Export Timestamps</span></div>
+        <textarea class="export-textarea" id="exportTextarea" readonly
+                  placeholder="Stamped timestamps will appear here as you mark them…"></textarea>
+        <div class="export-toolbar">
+          <select class="format-select" id="exportFormatSelect" title="Export format">
+            <option value="chapters">YouTube chapters (0:00 Name)</option>
+            <option value="dash">Time — Name</option>
+            <option value="brackets">[Time] Name</option>
+            <option value="csv">CSV (time,name)</option>
+          </select>
+          <button class="btn btn-primary" id="copyExportButton">Copy All</button>
+          <button class="btn btn-neutral" id="downloadExportButton">Download .txt</button>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</main>
+
+<div class="toast" id="toastElement"></div>
+<div class="version-badge">Timestamp Tracker v1.0</div>
+
+<script>
+/* ================================================================
+   Polymath Recording Timestamp Tracker
+   ----------------------------------------------------------------
+   - Timer with manual elapsed-time offset (matches Zoom recording)
+   - PDF question detection via pdf.js
+   - One-click stamping with auto-advance, skip, rename, re-stamp
+   - Export as chapters / dash / brackets / CSV
+   - Session persistence in localStorage
+   ================================================================ */
+
+(function () {
+  "use strict";
+
+  /* ------------------------------------------------------------
+     pdf.js worker setup
+     ------------------------------------------------------------ */
+  if (window.pdfjsLib) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  }
+
+  /* ------------------------------------------------------------
+     State
+     ------------------------------------------------------------ */
+  const STORAGE_KEY = "polymathTimestampTrackerSession_v1";
+
+  const appState = {
+    baseElapsedMilliseconds: 0,   // accumulated elapsed time while paused
+    runningSinceWallClock: null,  // Date.now() when timer was last started, or null when paused
+    isRunning: false,
+    questions: [],                // { id, name, previewText, timestampMilliseconds|null }
+    currentQuestionIndex: 0,
+    pdfFileName: null,
+    nextQuestionId: 1
+  };
+
+  /* ------------------------------------------------------------
+     Element references
+     ------------------------------------------------------------ */
+  const timerDisplay        = document.getElementById("timerDisplay");
+  const timerStateChip      = document.getElementById("timerStateChip");
+  const timerStatusLine     = document.getElementById("timerStatusLine");
+  const elapsedTimeInput    = document.getElementById("elapsedTimeInput");
+  const startPauseButton    = document.getElementById("startPauseButton");
+  const setTimeButton       = document.getElementById("setTimeButton");
+  const resetTimerButton    = document.getElementById("resetTimerButton");
+  const clearStampsButton   = document.getElementById("clearStampsButton");
+  const markButton          = document.getElementById("markButton");
+  const markButtonMain      = document.getElementById("markButtonMain");
+  const markButtonSub       = document.getElementById("markButtonSub");
+  const pdfDropZone         = document.getElementById("pdfDropZone");
+  const pdfFileInput        = document.getElementById("pdfFileInput");
+  const pdfStatusLine       = document.getElementById("pdfStatusLine");
+  const manualAddInput      = document.getElementById("manualAddInput");
+  const manualAddButton     = document.getElementById("manualAddButton");
+  const questionListElement = document.getElementById("questionList");
+  const emptyListMessage    = document.getElementById("emptyListMessage");
+  const questionCountChip   = document.getElementById("questionCountChip");
+  const stampedCountChip    = document.getElementById("stampedCountChip");
+  const exportTextarea      = document.getElementById("exportTextarea");
+  const exportFormatSelect  = document.getElementById("exportFormatSelect");
+  const copyExportButton    = document.getElementById("copyExportButton");
+  const downloadExportButton= document.getElementById("downloadExportButton");
+  const printButton         = document.getElementById("printButton");
+  const toastElement        = document.getElementById("toastElement");
+
+  /* ------------------------------------------------------------
+     Time helpers
+     ------------------------------------------------------------ */
+  function getCurrentElapsedMilliseconds() {
+    if (appState.isRunning && appState.runningSinceWallClock !== null) {
+      return appState.baseElapsedMilliseconds + (Date.now() - appState.runningSinceWallClock);
+    }
+    return appState.baseElapsedMilliseconds;
+  }
+
+  function formatMilliseconds(totalMilliseconds, options) {
+    const settings = options || {};
+    const totalSeconds = Math.max(0, Math.floor(totalMilliseconds / 1000));
+    const hours   = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const pad = function (value) { return String(value).padStart(2, "0"); };
+
+    if (settings.compact && hours === 0) {
+      // YouTube-chapter style: M:SS (no leading zero on minutes)
+      return minutes + ":" + pad(seconds);
+    }
+    if (settings.compact) {
+      return hours + ":" + pad(minutes) + ":" + pad(seconds);
+    }
+    return pad(hours) + ":" + pad(minutes) + ":" + pad(seconds);
+  }
+
+  function parseTimeInputToMilliseconds(rawText) {
+    if (!rawText) return null;
+    const cleanedText = rawText.trim();
+    if (cleanedText === "") return null;
+
+    // Accept H:MM:SS, MM:SS, M:SS, or a plain number of seconds
+    const colonParts = cleanedText.split(":").map(function (part) { return part.trim(); });
+
+    if (colonParts.length === 1) {
+      const plainSeconds = Number(colonParts[0]);
+      if (!isFinite(plainSeconds) || plainSeconds < 0) return null;
+      return Math.floor(plainSeconds * 1000);
+    }
+
+    if (colonParts.length === 2) {
+      const minutesPart = Number(colonParts[0]);
+      const secondsPart = Number(colonParts[1]);
+      if (!isFinite(minutesPart) || !isFinite(secondsPart)) return null;
+      if (minutesPart < 0 || secondsPart < 0 || secondsPart >= 60) return null;
+      return Math.floor((minutesPart * 60 + secondsPart) * 1000);
+    }
+
+    if (colonParts.length === 3) {
+      const hoursPart   = Number(colonParts[0]);
+      const minutesPart = Number(colonParts[1]);
+      const secondsPart = Number(colonParts[2]);
+      if (!isFinite(hoursPart) || !isFinite(minutesPart) || !isFinite(secondsPart)) return null;
+      if (hoursPart < 0 || minutesPart < 0 || minutesPart >= 60 || secondsPart < 0 || secondsPart >= 60) return null;
+      return Math.floor((hoursPart * 3600 + minutesPart * 60 + secondsPart) * 1000);
+    }
+
+    return null;
+  }
+
+  /* ------------------------------------------------------------
+     Timer loop
+     ------------------------------------------------------------ */
+  let lastRenderedSecond = -1;
+
+  function timerRenderLoop() {
+    const elapsedMilliseconds = getCurrentElapsedMilliseconds();
+    const wholeSecond = Math.floor(elapsedMilliseconds / 1000);
+    if (wholeSecond !== lastRenderedSecond) {
+      lastRenderedSecond = wholeSecond;
+      timerDisplay.textContent = formatMilliseconds(elapsedMilliseconds);
+    }
+    window.requestAnimationFrame(timerRenderLoop);
+  }
+
+  function pulseTimerDisplay() {
+    timerDisplay.classList.remove("timer-pulse");
+    // Force reflow so the animation can replay
+    void timerDisplay.offsetWidth;
+    timerDisplay.classList.add("timer-pulse");
+  }
+
+  function refreshTimerControls() {
+    if (appState.isRunning) {
+      startPauseButton.textContent = "Pause";
+      timerDisplay.classList.add("timer-running");
+      timerStateChip.textContent = "Running";
+      timerStatusLine.textContent = "Timer is tracking your recording time.";
+    } else {
+      startPauseButton.textContent = appState.baseElapsedMilliseconds > 0 ? "Resume" : "Start Timer";
+      timerDisplay.classList.remove("timer-running");
+      timerStateChip.textContent = appState.baseElapsedMilliseconds > 0 ? "Paused" : "Stopped";
+      timerStatusLine.textContent = appState.baseElapsedMilliseconds > 0
+        ? "Paused — press Resume to continue."
+        : "Enter the current elapsed time of your recording, then press Start.";
+    }
+  }
+
+  function startOrPauseTimer() {
+    if (appState.isRunning) {
+      appState.baseElapsedMilliseconds = getCurrentElapsedMilliseconds();
+      appState.runningSinceWallClock = null;
+      appState.isRunning = false;
+    } else {
+      // If the user typed a time and hasn't applied it yet, apply it on Start
+      const typedMilliseconds = parseTimeInputToMilliseconds(elapsedTimeInput.value);
+      if (typedMilliseconds !== null && !appState.isRunning && appState.baseElapsedMilliseconds === 0) {
+        appState.baseElapsedMilliseconds = typedMilliseconds;
+      }
+      appState.runningSinceWallClock = Date.now();
+      appState.isRunning = true;
+    }
+    lastRenderedSecond = -1;
+    refreshTimerControls();
+    persistSession();
+  }
+
+  function applyTypedTime() {
+    const typedMilliseconds = parseTimeInputToMilliseconds(elapsedTimeInput.value);
+    if (typedMilliseconds === null) {
+      showToast("Could not read that time — try 12:34 or 1:05:20");
+      return;
+    }
+    appState.baseElapsedMilliseconds = typedMilliseconds;
+    if (appState.isRunning) appState.runningSinceWallClock = Date.now();
+    lastRenderedSecond = -1;
+    pulseTimerDisplay();
+    refreshTimerControls();
+    persistSession();
+    showToast("Timer set to " + formatMilliseconds(typedMilliseconds));
+  }
+
+  function nudgeTimer(deltaSeconds) {
+    const currentMilliseconds = getCurrentElapsedMilliseconds();
+    const newMilliseconds = Math.max(0, currentMilliseconds + deltaSeconds * 1000);
+    appState.baseElapsedMilliseconds = newMilliseconds;
+    if (appState.isRunning) appState.runningSinceWallClock = Date.now();
+    lastRenderedSecond = -1;
+    pulseTimerDisplay();
+    persistSession();
+  }
+
+  function resetTimer() {
+    if (!window.confirm("Reset the timer to 00:00:00? Stamped timestamps are kept.")) return;
+    appState.baseElapsedMilliseconds = 0;
+    appState.runningSinceWallClock = null;
+    appState.isRunning = false;
+    lastRenderedSecond = -1;
+    refreshTimerControls();
+    persistSession();
+  }
+
+  /* ------------------------------------------------------------
+     Question model
+     ------------------------------------------------------------ */
+  function createQuestion(name, previewText) {
+    return {
+      id: appState.nextQuestionId++,
+      name: name,
+      previewText: previewText || "",
+      timestampMilliseconds: null
+    };
+  }
+
+  function getCurrentQuestion() {
+    return appState.questions[appState.currentQuestionIndex] || null;
+  }
+
+  function findNextUnstampedIndex(fromIndexExclusive) {
+    for (let index = fromIndexExclusive + 1; index < appState.questions.length; index++) {
+      if (appState.questions[index].timestampMilliseconds === null) return index;
+    }
+    // Wrap: look for any unstamped question from the top
+    for (let index = 0; index < appState.questions.length; index++) {
+      if (appState.questions[index].timestampMilliseconds === null) return index;
+    }
+    return null;
+  }
+
+  /* ------------------------------------------------------------
+     Stamping
+     ------------------------------------------------------------ */
+  function stampCurrentQuestion() {
+    const currentQuestion = getCurrentQuestion();
+    if (!currentQuestion) return;
+
+    if (!appState.isRunning && appState.baseElapsedMilliseconds === 0) {
+      showToast("Start the timer first");
+      return;
+    }
+
+    currentQuestion.timestampMilliseconds = getCurrentElapsedMilliseconds();
+
+    // Success animation on the big button
+    markButton.classList.add("mark-success", "btn-clicked");
+    window.setTimeout(function () {
+      markButton.classList.remove("mark-success", "btn-clicked");
+    }, 500);
+
+    const stampedIndex = appState.currentQuestionIndex;
+
+    // Auto-advance to the next unstamped question (if any)
+    const nextIndex = findNextUnstampedIndex(stampedIndex);
+    if (nextIndex !== null) appState.currentQuestionIndex = nextIndex;
+
+    renderQuestionList();
+    flashQuestionRow(stampedIndex);
+    refreshMarkButton();
+    refreshCounts();
+    refreshExportText();
+    persistSession();
+    showToast(currentQuestion.name + " stamped at " + formatMilliseconds(currentQuestion.timestampMilliseconds, { compact: true }));
+  }
+
+  function flashQuestionRow(questionIndex) {
+    const rowElement = questionListElement.querySelector('[data-question-index="' + questionIndex + '"]');
+    if (!rowElement) return;
+    rowElement.classList.add("row-flash");
+    window.setTimeout(function () { rowElement.classList.remove("row-flash"); }, 750);
+  }
+
+  function selectQuestion(questionIndex) {
+    if (questionIndex < 0 || questionIndex >= appState.questions.length) return;
+    appState.currentQuestionIndex = questionIndex;
+    renderQuestionList();
+    refreshMarkButton();
+    persistSession();
+    scrollCurrentRowIntoView();
+  }
+
+  function scrollCurrentRowIntoView() {
+    const rowElement = questionListElement.querySelector(".row-current");
+    if (rowElement && typeof rowElement.scrollIntoView === "function") {
+      rowElement.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }
+
+  /* ------------------------------------------------------------
+     Rendering — question list
+     ------------------------------------------------------------ */
+  function renderQuestionList() {
+    questionListElement.innerHTML = "";
+    emptyListMessage.style.display = appState.questions.length === 0 ? "" : "none";
+
+    appState.questions.forEach(function (question, questionIndex) {
+      const rowElement = document.createElement("li");
+      rowElement.className = "question-row";
+      rowElement.dataset.questionIndex = String(questionIndex);
+      if (questionIndex === appState.currentQuestionIndex) rowElement.classList.add("row-current");
+      if (question.timestampMilliseconds !== null) rowElement.classList.add("row-stamped");
+
+      /* Number bubble */
+      const numberBubble = document.createElement("span");
+      numberBubble.className = "question-row-number";
+      numberBubble.textContent = String(questionIndex + 1);
+      rowElement.appendChild(numberBubble);
+
+      /* Name + preview */
+      const bodyContainer = document.createElement("div");
+      bodyContainer.className = "question-row-body";
+
+      const nameElement = document.createElement("div");
+      nameElement.className = "question-row-name";
+      nameElement.textContent = question.name;
+      nameElement.title = "Double-click to rename";
+      bodyContainer.appendChild(nameElement);
+
+      if (question.previewText) {
+        const previewElement = document.createElement("div");
+        previewElement.className = "question-row-preview";
+        previewElement.textContent = question.previewText;
+        bodyContainer.appendChild(previewElement);
+      }
+      rowElement.appendChild(bodyContainer);
+
+      /* Timestamp chip */
+      const timestampChip = document.createElement("span");
+      timestampChip.className = "question-row-timestamp " +
+        (question.timestampMilliseconds === null ? "timestamp-empty" : "timestamp-set");
+      timestampChip.textContent = question.timestampMilliseconds === null
+        ? "— : — : —"
+        : formatMilliseconds(question.timestampMilliseconds);
+      rowElement.appendChild(timestampChip);
+
+      /* Row actions: rename / re-stamp / clear stamp / delete */
+      const actionsContainer = document.createElement("div");
+      actionsContainer.className = "question-row-actions";
+
+      const renameButton = makeRowActionButton("Rename",
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>');
+      renameButton.addEventListener("click", function (event) {
+        event.stopPropagation();
+        beginRenameQuestion(questionIndex, nameElement, bodyContainer);
+      });
+      actionsContainer.appendChild(renameButton);
+
+      const restampButton = makeRowActionButton("Stamp this question now (overwrites)",
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"></circle><path d="M12 9v4l2.5 2.5"></path><path d="M9 2h6"></path></svg>');
+      restampButton.addEventListener("click", function (event) {
+        event.stopPropagation();
+        appState.currentQuestionIndex = questionIndex;
+        stampCurrentQuestion();
+      });
+      actionsContainer.appendChild(restampButton);
+
+      if (question.timestampMilliseconds !== null) {
+        const clearStampButton = makeRowActionButton("Clear this timestamp",
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line><path d="M5 6l1 14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-14"></path></svg>');
+        clearStampButton.classList.add("row-action-danger");
+        clearStampButton.addEventListener("click", function (event) {
+          event.stopPropagation();
+          question.timestampMilliseconds = null;
+          renderQuestionList();
+          refreshCounts();
+          refreshExportText();
+          persistSession();
+        });
+        actionsContainer.appendChild(clearStampButton);
+      } else {
+        const deleteButton = makeRowActionButton("Remove this question",
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>');
+        deleteButton.classList.add("row-action-danger");
+        deleteButton.addEventListener("click", function (event) {
+          event.stopPropagation();
+          appState.questions.splice(questionIndex, 1);
+          if (appState.currentQuestionIndex >= appState.questions.length) {
+            appState.currentQuestionIndex = Math.max(0, appState.questions.length - 1);
+          }
+          renderQuestionList();
+          refreshMarkButton();
+          refreshCounts();
+          refreshExportText();
+          persistSession();
+        });
+        actionsContainer.appendChild(deleteButton);
+      }
+
+      rowElement.appendChild(actionsContainer);
+
+      /* Click selects; double-click on the name renames */
+      rowElement.addEventListener("click", function () { selectQuestion(questionIndex); });
+      nameElement.addEventListener("dblclick", function (event) {
+        event.stopPropagation();
+        beginRenameQuestion(questionIndex, nameElement, bodyContainer);
+      });
+
+      questionListElement.appendChild(rowElement);
+    });
+  }
+
+  function makeRowActionButton(titleText, svgMarkup) {
+    const buttonElement = document.createElement("button");
+    buttonElement.className = "row-action-button";
+    buttonElement.title = titleText;
+    buttonElement.innerHTML = svgMarkup;
+    return buttonElement;
+  }
+
+  /* ------------------------------------------------------------
+     Renaming (overwrite the name)
+     ------------------------------------------------------------ */
+  function beginRenameQuestion(questionIndex, nameElement, bodyContainer) {
+    const question = appState.questions[questionIndex];
+    if (!question) return;
+
+    const editInput = document.createElement("input");
+    editInput.type = "text";
+    editInput.className = "question-name-edit-input";
+    editInput.value = question.name;
+
+    nameElement.style.display = "none";
+    bodyContainer.insertBefore(editInput, nameElement);
+    editInput.focus();
+    editInput.select();
+    editInput.addEventListener("click", function (event) { event.stopPropagation(); });
+
+    let renameFinished = false;
+    function finishRename(shouldCommit) {
+      if (renameFinished) return;
+      renameFinished = true;
+      if (shouldCommit) {
+        const newName = editInput.value.trim();
+        if (newName !== "") question.name = newName;
+      }
+      renderQuestionList();
+      refreshMarkButton();
+      refreshExportText();
+      persistSession();
+    }
+
+    editInput.addEventListener("keydown", function (event) {
+      if (event.key === "Enter") { event.preventDefault(); finishRename(true); }
+      if (event.key === "Escape") { event.preventDefault(); finishRename(false); }
+      event.stopPropagation();
+    });
+    editInput.addEventListener("blur", function () { finishRename(true); });
+  }
+
+  /* ------------------------------------------------------------
+     Counts, mark button, export
+     ------------------------------------------------------------ */
+  function refreshCounts() {
+    const totalQuestions = appState.questions.length;
+    const stampedQuestions = appState.questions.filter(function (question) {
+      return question.timestampMilliseconds !== null;
+    }).length;
+    questionCountChip.textContent = totalQuestions + (totalQuestions === 1 ? " question" : " questions");
+    stampedCountChip.textContent = stampedQuestions + " stamped";
+  }
+
+  function refreshMarkButton() {
+    const currentQuestion = getCurrentQuestion();
+    if (!currentQuestion) {
+      markButton.disabled = true;
+      markButtonMain.textContent = "Mark Timestamp";
+      markButtonSub.textContent = "Load questions to begin";
+      return;
+    }
+    markButton.disabled = false;
+    markButtonMain.textContent = "Mark: " + currentQuestion.name;
+    markButtonSub.textContent = currentQuestion.timestampMilliseconds === null
+      ? "Stamps current time, then moves to the next question"
+      : "Already stamped at " + formatMilliseconds(currentQuestion.timestampMilliseconds, { compact: true }) + " — will overwrite";
+  }
+
+  function buildExportText() {
+    const format = exportFormatSelect.value;
+    const stampedQuestions = appState.questions.filter(function (question) {
+      return question.timestampMilliseconds !== null;
+    });
+    stampedQuestions.sort(function (a, b) { return a.timestampMilliseconds - b.timestampMilliseconds; });
+
+    return stampedQuestions.map(function (question) {
+      const compactTime = formatMilliseconds(question.timestampMilliseconds, { compact: true });
+      const fullTime = formatMilliseconds(question.timestampMilliseconds);
+      switch (format) {
+        case "dash":     return compactTime + " — " + question.name;
+        case "brackets": return "[" + fullTime + "] " + question.name;
+        case "csv":      return fullTime + "," + question.name.replace(/,/g, " ");
+        case "chapters":
+        default:         return compactTime + " " + question.name;
+      }
+    }).join("\n");
+  }
+
+  function refreshExportText() {
+    exportTextarea.value = buildExportText();
+  }
+
+  /* ------------------------------------------------------------
+     PDF question detection
+     ------------------------------------------------------------ */
+  const QUESTION_START_PATTERNS = [
+    /^Q\s?(\d{1,3})\b[\.\):]?\s*(.*)$/i,          // Q1, Q 1, Q1., Q1)
+    /^Question\s+(\d{1,3})\b[\.\):]?\s*(.*)$/i,   // Question 1
+    /^(\d{1,3})[\.\)]\s+(.*)$/                    // 1. text / 1) text
+  ];
+
+  async function handlePdfFile(pdfFile) {
+    if (!pdfFile) return;
+    if (!window.pdfjsLib) {
+      setPdfStatus("pdf.js failed to load — check your internet connection.", true);
+      return;
+    }
+
+    setPdfStatus('<span class="spinner"></span>Reading "' + escapeHtml(pdfFile.name) + '"…');
+
+    try {
+      const arrayBuffer = await pdfFile.arrayBuffer();
+      const pdfDocument = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+      const detectedQuestions = [];
+      const seenQuestionNumbers = new Set();
+
+      for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber++) {
+        setPdfStatus('<span class="spinner"></span>Scanning page ' + pageNumber + " of " + pdfDocument.numPages + "…");
+        const page = await pdfDocument.getPage(pageNumber);
+        const textContent = await page.getTextContent();
+        const lines = groupTextItemsIntoLines(textContent.items);
+
+        lines.forEach(function (lineText) {
+          const match = matchQuestionStart(lineText);
+          if (!match) return;
+          const questionNumber = match.number;
+          // Avoid duplicates (answer keys, repeated headers). Keep the FIRST occurrence.
+          if (seenQuestionNumbers.has(questionNumber)) return;
+          seenQuestionNumbers.add(questionNumber);
+          detectedQuestions.push({
+            number: questionNumber,
+            preview: match.preview
+          });
+        });
+      }
+
+      detectedQuestions.sort(function (a, b) { return a.number - b.number; });
+
+      if (detectedQuestions.length === 0) {
+        setPdfStatus("No question numbers detected — add questions manually below.", true);
+        return;
+      }
+
+      // Replace or append? If there are existing questions, confirm replacement.
+      if (appState.questions.length > 0) {
+        const shouldReplace = window.confirm(
+          "Replace the current question list with " + detectedQuestions.length +
+          " questions detected from the PDF?\n\n(Cancel keeps your current list.)"
+        );
+        if (!shouldReplace) {
+          setPdfStatus("Kept existing list. PDF was not applied.");
+          return;
+        }
+      }
+
+      appState.questions = detectedQuestions.map(function (detected) {
+        return createQuestion("Q" + detected.number, detected.preview);
+      });
+      appState.currentQuestionIndex = 0;
+      appState.pdfFileName = pdfFile.name;
+
+      renderQuestionList();
+      refreshMarkButton();
+      refreshCounts();
+      refreshExportText();
+      persistSession();
+
+      setPdfStatus("Loaded " + detectedQuestions.length + ' questions from "' + escapeHtml(pdfFile.name) + '"');
+      showToast(detectedQuestions.length + " questions ready to stamp");
+    } catch (error) {
+      console.error("PDF parsing error:", error);
+      setPdfStatus("Could not read that PDF — is it a valid, non-encrypted file?", true);
+    }
+  }
+
+  function groupTextItemsIntoLines(textItems) {
+    // pdf.js gives positioned text runs. Group runs that share (roughly) the
+    // same vertical position into a single logical line, ordered left-to-right.
+    const lineBuckets = [];
+    const VERTICAL_TOLERANCE = 3.5;
+
+    textItems.forEach(function (item) {
+      if (!item.str || item.str.trim() === "") return;
+      const yPosition = item.transform[5];
+      const xPosition = item.transform[4];
+
+      let bucket = null;
+      for (let bucketIndex = 0; bucketIndex < lineBuckets.length; bucketIndex++) {
+        if (Math.abs(lineBuckets[bucketIndex].y - yPosition) <= VERTICAL_TOLERANCE) {
+          bucket = lineBuckets[bucketIndex];
+          break;
+        }
+      }
+      if (!bucket) {
+        bucket = { y: yPosition, runs: [] };
+        lineBuckets.push(bucket);
+      }
+      bucket.runs.push({ x: xPosition, text: item.str });
+    });
+
+    // Sort lines top-to-bottom (PDF y increases upward), runs left-to-right
+    lineBuckets.sort(function (a, b) { return b.y - a.y; });
+    return lineBuckets.map(function (bucket) {
+      bucket.runs.sort(function (a, b) { return a.x - b.x; });
+      return bucket.runs.map(function (run) { return run.text; }).join(" ").replace(/\s+/g, " ").trim();
+    });
+  }
+
+  function matchQuestionStart(lineText) {
+    for (let patternIndex = 0; patternIndex < QUESTION_START_PATTERNS.length; patternIndex++) {
+      const match = lineText.match(QUESTION_START_PATTERNS[patternIndex]);
+      if (match) {
+        const questionNumber = parseInt(match[1], 10);
+        if (!isFinite(questionNumber) || questionNumber < 1 || questionNumber > 200) continue;
+        const previewText = (match[2] || "").trim().slice(0, 80);
+        // Guard against page numbers / years being mistaken for questions:
+        // require either a preview with some substance, or a small number
+        if (previewText.length < 3 && questionNumber > 60) continue;
+        return { number: questionNumber, preview: previewText };
+      }
+    }
+    return null;
+  }
+
+  function setPdfStatus(htmlText, isError) {
+    pdfStatusLine.innerHTML = htmlText;
+    pdfStatusLine.classList.toggle("pdf-status-error", !!isError);
+  }
+
+  function escapeHtml(rawText) {
+    const helperDiv = document.createElement("div");
+    helperDiv.textContent = rawText;
+    return helperDiv.innerHTML;
+  }
+
+  /* ------------------------------------------------------------
+     Manual add
+     ------------------------------------------------------------ */
+  function addManualQuestion() {
+    const rawName = manualAddInput.value.trim();
+    const questionName = rawName !== "" ? rawName : "Q" + (appState.questions.length + 1);
+    appState.questions.push(createQuestion(questionName, ""));
+    manualAddInput.value = "";
+
+    if (appState.questions.length === 1) appState.currentQuestionIndex = 0;
+
+    renderQuestionList();
+    refreshMarkButton();
+    refreshCounts();
+    persistSession();
+  }
+
+  /* ------------------------------------------------------------
+     Export actions
+     ------------------------------------------------------------ */
+  function copyExportToClipboard() {
+    refreshExportText();
+    if (exportTextarea.value.trim() === "") {
+      showToast("No stamped timestamps to copy yet");
+      return;
+    }
+    navigator.clipboard.writeText(exportTextarea.value).then(function () {
+      showToast("Timestamps copied to clipboard");
+      copyExportButton.classList.add("btn-clicked");
+      window.setTimeout(function () { copyExportButton.classList.remove("btn-clicked"); }, 400);
+    }).catch(function () {
+      exportTextarea.select();
+      document.execCommand("copy");
+      showToast("Timestamps copied");
+    });
+  }
+
+  function downloadExportAsTextFile() {
+    refreshExportText();
+    if (exportTextarea.value.trim() === "") {
+      showToast("Nothing to download yet");
+      return;
+    }
+    const baseName = appState.pdfFileName
+      ? appState.pdfFileName.replace(/\.pdf$/i, "")
+      : "recording";
+    const blob = new Blob([exportTextarea.value], { type: "text/plain;charset=utf-8" });
+    const downloadLink = document.createElement("a");
+    downloadLink.href = URL.createObjectURL(blob);
+    downloadLink.download = baseName + "-timestamps.txt";
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
+    URL.revokeObjectURL(downloadLink.href);
+  }
+
+  /* ------------------------------------------------------------
+     Toast
+     ------------------------------------------------------------ */
+  let toastTimeoutHandle = null;
+  function showToast(messageText) {
+    toastElement.textContent = messageText;
+    toastElement.classList.add("toast-visible");
+    if (toastTimeoutHandle) window.clearTimeout(toastTimeoutHandle);
+    toastTimeoutHandle = window.setTimeout(function () {
+      toastElement.classList.remove("toast-visible");
+    }, 2200);
+  }
+
+  /* ------------------------------------------------------------
+     Persistence (localStorage) — survive accidental refresh
+     ------------------------------------------------------------ */
+  function persistSession() {
+    try {
+      const snapshot = {
+        baseElapsedMilliseconds: getCurrentElapsedMilliseconds(),
+        savedAtWallClock: Date.now(),
+        wasRunning: appState.isRunning,
+        questions: appState.questions,
+        currentQuestionIndex: appState.currentQuestionIndex,
+        pdfFileName: appState.pdfFileName,
+        nextQuestionId: appState.nextQuestionId
+      };
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+    } catch (storageError) {
+      /* Private mode / quota — persistence is a convenience, not a requirement */
+    }
+  }
+
+  function restoreSession() {
+    try {
+      const rawSnapshot = window.localStorage.getItem(STORAGE_KEY);
+      if (!rawSnapshot) return;
+      const snapshot = JSON.parse(rawSnapshot);
+      if (!snapshot || !Array.isArray(snapshot.questions)) return;
+      if (snapshot.questions.length === 0 && !snapshot.baseElapsedMilliseconds) return;
+
+      const shouldRestore = window.confirm(
+        "A previous timestamping session was found" +
+        (snapshot.pdfFileName ? ' ("' + snapshot.pdfFileName + '")' : "") +
+        ". Restore it?\n\n(Cancel starts fresh.)"
+      );
+      if (!shouldRestore) {
+        window.localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
+
+      appState.questions = snapshot.questions;
+      appState.currentQuestionIndex = Math.min(
+        snapshot.currentQuestionIndex || 0,
+        Math.max(0, appState.questions.length - 1)
+      );
+      appState.pdfFileName = snapshot.pdfFileName || null;
+      appState.nextQuestionId = snapshot.nextQuestionId || (appState.questions.length + 1);
+
+      if (snapshot.wasRunning) {
+        // Continue counting through the refresh gap so the timer stays in sync
+        const gapMilliseconds = Date.now() - (snapshot.savedAtWallClock || Date.now());
+        appState.baseElapsedMilliseconds = (snapshot.baseElapsedMilliseconds || 0) + Math.max(0, gapMilliseconds);
+        appState.runningSinceWallClock = Date.now();
+        appState.isRunning = true;
+      } else {
+        appState.baseElapsedMilliseconds = snapshot.baseElapsedMilliseconds || 0;
+        appState.isRunning = false;
+      }
+
+      if (appState.pdfFileName) {
+        setPdfStatus('Restored session for "' + escapeHtml(appState.pdfFileName) + '"');
+      }
+    } catch (restoreError) {
+      /* Corrupt snapshot — ignore and start fresh */
+    }
+  }
+
+  function clearAllStamps() {
+    if (!window.confirm("Clear ALL stamped timestamps? The question list is kept.")) return;
+    appState.questions.forEach(function (question) { question.timestampMilliseconds = null; });
+    appState.currentQuestionIndex = 0;
+    renderQuestionList();
+    refreshMarkButton();
+    refreshCounts();
+    refreshExportText();
+    persistSession();
+  }
+
+  /* ------------------------------------------------------------
+     Event wiring
+     ------------------------------------------------------------ */
+  startPauseButton.addEventListener("click", startOrPauseTimer);
+  setTimeButton.addEventListener("click", applyTypedTime);
+  resetTimerButton.addEventListener("click", resetTimer);
+  clearStampsButton.addEventListener("click", clearAllStamps);
+  markButton.addEventListener("click", stampCurrentQuestion);
+  printButton.addEventListener("click", function () { window.print(); });
+
+  elapsedTimeInput.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") { event.preventDefault(); applyTypedTime(); }
+  });
+
+  document.querySelectorAll(".nudge-button").forEach(function (nudgeButtonElement) {
+    nudgeButtonElement.addEventListener("click", function () {
+      nudgeTimer(Number(nudgeButtonElement.dataset.nudge));
+    });
+  });
+
+  /* PDF drop zone: click, drag-drop */
+  pdfDropZone.addEventListener("click", function () { pdfFileInput.click(); });
+  pdfFileInput.addEventListener("change", function () {
+    if (pdfFileInput.files && pdfFileInput.files[0]) handlePdfFile(pdfFileInput.files[0]);
+    pdfFileInput.value = "";
+  });
+  ["dragenter", "dragover"].forEach(function (eventName) {
+    pdfDropZone.addEventListener(eventName, function (event) {
+      event.preventDefault();
+      pdfDropZone.classList.add("drop-zone-active");
+    });
+  });
+  ["dragleave", "drop"].forEach(function (eventName) {
+    pdfDropZone.addEventListener(eventName, function (event) {
+      event.preventDefault();
+      pdfDropZone.classList.remove("drop-zone-active");
+    });
+  });
+  pdfDropZone.addEventListener("drop", function (event) {
+    const droppedFile = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+    if (droppedFile) handlePdfFile(droppedFile);
+  });
+
+  /* Manual add */
+  manualAddButton.addEventListener("click", addManualQuestion);
+  manualAddInput.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") { event.preventDefault(); addManualQuestion(); }
+  });
+
+  /* Export */
+  exportFormatSelect.addEventListener("change", refreshExportText);
+  copyExportButton.addEventListener("click", copyExportToClipboard);
+  downloadExportButton.addEventListener("click", downloadExportAsTextFile);
+
+  /* Keyboard shortcuts: Space = stamp, ↑/↓ = move between questions */
+  document.addEventListener("keydown", function (event) {
+    const activeTag = document.activeElement ? document.activeElement.tagName : "";
+    const typingInField = activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT";
+    if (typingInField) return;
+
+    if (event.code === "Space") {
+      event.preventDefault();
+      stampCurrentQuestion();
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      selectQuestion(Math.min(appState.questions.length - 1, appState.currentQuestionIndex + 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      selectQuestion(Math.max(0, appState.currentQuestionIndex - 1));
+    }
+  });
+
+  /* Persist every 5 seconds while running so a crash loses almost nothing */
+  window.setInterval(function () {
+    if (appState.isRunning) persistSession();
+  }, 5000);
+
+  /* ------------------------------------------------------------
+     Boot
+     ------------------------------------------------------------ */
+  restoreSession();
+  renderQuestionList();
+  refreshTimerControls();
+  refreshMarkButton();
+  refreshCounts();
+  refreshExportText();
+  timerRenderLoop();
+})();
+</script>
+</body>
+</html>
