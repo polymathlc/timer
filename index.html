@@ -197,7 +197,7 @@
     color: var(--text-secondary);
     text-align: center;
     margin-bottom: var(--space-xl);
-    max-width: 640px;
+    max-width: 660px;
     margin-left: auto;
     margin-right: auto;
   }
@@ -436,6 +436,23 @@
   }
   .pdf-status.pdf-status-error { color: var(--danger-base); }
 
+  .pdf-options-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    user-select: none;
+  }
+  .pdf-options-row input[type="checkbox"] {
+    width: 16px; height: 16px;
+    accent-color: var(--accent-dark);
+    cursor: pointer;
+  }
+  .pdf-options-row label { cursor: pointer; }
+
   .spinner {
     display: inline-block;
     width: 14px; height: 14px;
@@ -500,6 +517,7 @@
     background: var(--bg-primary);
     margin-bottom: var(--space-sm);
     cursor: pointer;
+    position: relative;
     transition: border-color var(--transition-base), background var(--transition-base),
                 box-shadow var(--transition-base), transform var(--transition-base);
     animation: rowScaleIn 0.3s ease both;
@@ -522,9 +540,7 @@
     0%   { background: var(--success-bg); }
     100% { background: var(--bg-primary); }
   }
-  .question-row.row-current.row-flash {
-    animation: rowStampFlashCurrent 0.7s ease;
-  }
+  .question-row.row-current.row-flash { animation: rowStampFlashCurrent 0.7s ease; }
   @keyframes rowStampFlashCurrent {
     0%   { background: var(--success-bg); }
     100% { background: var(--accent-bg); }
@@ -585,10 +601,26 @@
     padding: 5px 10px;
     min-width: 88px;
     text-align: center;
-    transition: background var(--transition-base), color var(--transition-base);
+    border: 1px solid transparent;
+    transition: background var(--transition-base), color var(--transition-base), border-color var(--transition-base);
   }
+  .question-row-timestamp:hover { border-color: var(--accent-base); }
   .question-row-timestamp.timestamp-empty { color: var(--text-tertiary); font-weight: 500; }
   .question-row-timestamp.timestamp-set   { background: var(--success-bg); color: #33691E; }
+
+  .timestamp-edit-input {
+    flex: 0 0 auto;
+    width: 108px;
+    padding: 5px 8px;
+    font-size: var(--font-size-base);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    border: 1px solid var(--accent-base);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 0 0 3px var(--accent-bg);
+    outline: none;
+  }
 
   .question-row-actions {
     flex: 0 0 auto;
@@ -765,7 +797,8 @@
   <h1 class="page-title">Recording Timestamp Tracker</h1>
   <p class="page-subtitle">
     Key in how far along your Zoom recording is, start the timer, load your exam paper PDF,
-    then stamp each question as you reach it. Rename, re-stamp or skip around freely.
+    then stamp each question and part as you reach it. Rename, re-stamp, edit times,
+    insert rows, or skip around freely.
   </p>
 
   <div class="workspace-grid">
@@ -822,9 +855,15 @@
 
         <div class="pdf-drop-zone" id="pdfDropZone">
           <div class="drop-zone-title">Drop your PDF here, or click to browse</div>
-          <div class="drop-zone-sub">Questions will be detected automatically (Q1, 1., Question 1 …)</div>
+          <div class="drop-zone-sub">Detects Q1, Question 1, 1. … and parts (a), (b), (c)</div>
         </div>
         <input type="file" id="pdfFileInput" accept="application/pdf" style="display:none" />
+
+        <div class="pdf-options-row">
+          <input type="checkbox" id="detectPartsCheckbox" checked />
+          <label for="detectPartsCheckbox">Split questions into parts (a), (b), (c)…</label>
+        </div>
+
         <div class="pdf-status" id="pdfStatusLine"></div>
 
         <div class="manual-add-row">
@@ -844,7 +883,7 @@
         <div class="panel-label">
           <span>Questions</span>
           <div class="question-list-toolbar">
-            <span class="question-count-chip" id="questionCountChip">0 questions</span>
+            <span class="question-count-chip" id="questionCountChip">0 entries</span>
             <span class="question-count-chip" id="stampedCountChip">0 stamped</span>
           </div>
         </div>
@@ -878,14 +917,19 @@
 </main>
 
 <div class="toast" id="toastElement"></div>
-<div class="version-badge">Timestamp Tracker v1.0</div>
+<div class="version-badge">Timestamp Tracker v1.1</div>
 
 <script>
 /* ================================================================
-   Polymath Recording Timestamp Tracker
+   Polymath Recording Timestamp Tracker — v1.1
    ----------------------------------------------------------------
+   New in v1.1:
+   - Insert an entry above or below any slot (row hover actions)
+   - Click any timestamp chip to edit the time directly
+   - PDF scan now detects parts (a), (b), (c)… and creates
+     Q5(a), Q5(b), Q5(c) entries automatically (toggleable)
+   Core:
    - Timer with manual elapsed-time offset (matches Zoom recording)
-   - PDF question detection via pdf.js
    - One-click stamping with auto-advance, skip, rename, re-stamp
    - Export as chapters / dash / brackets / CSV
    - Session persistence in localStorage
@@ -917,6 +961,10 @@
     nextQuestionId: 1
   };
 
+  /* When set, renderQuestionList() opens the rename editor on this
+     index right after rendering (used by "insert above/below") */
+  let pendingRenameIndex = null;
+
   /* ------------------------------------------------------------
      Element references
      ------------------------------------------------------------ */
@@ -930,10 +978,11 @@
   const clearStampsButton   = document.getElementById("clearStampsButton");
   const markButton          = document.getElementById("markButton");
   const markButtonMain      = document.getElementById("markButtonMain");
-  const markButtonSub       = document.getElementById("markButtonSub");
+  const markButtonSub      = document.getElementById("markButtonSub");
   const pdfDropZone         = document.getElementById("pdfDropZone");
   const pdfFileInput        = document.getElementById("pdfFileInput");
   const pdfStatusLine       = document.getElementById("pdfStatusLine");
+  const detectPartsCheckbox = document.getElementById("detectPartsCheckbox");
   const manualAddInput      = document.getElementById("manualAddInput");
   const manualAddButton     = document.getElementById("manualAddButton");
   const questionListElement = document.getElementById("questionList");
@@ -1026,8 +1075,7 @@
 
   function pulseTimerDisplay() {
     timerDisplay.classList.remove("timer-pulse");
-    // Force reflow so the animation can replay
-    void timerDisplay.offsetWidth;
+    void timerDisplay.offsetWidth; // force reflow so the animation replays
     timerDisplay.classList.add("timer-pulse");
   }
 
@@ -1055,7 +1103,7 @@
     } else {
       // If the user typed a time and hasn't applied it yet, apply it on Start
       const typedMilliseconds = parseTimeInputToMilliseconds(elapsedTimeInput.value);
-      if (typedMilliseconds !== null && !appState.isRunning && appState.baseElapsedMilliseconds === 0) {
+      if (typedMilliseconds !== null && appState.baseElapsedMilliseconds === 0) {
         appState.baseElapsedMilliseconds = typedMilliseconds;
       }
       appState.runningSinceWallClock = Date.now();
@@ -1126,6 +1174,26 @@
       if (appState.questions[index].timestampMilliseconds === null) return index;
     }
     return null;
+  }
+
+  /* ------------------------------------------------------------
+     Insert above / below any slot
+     ------------------------------------------------------------ */
+  function insertQuestionAt(insertIndex) {
+    const boundedIndex = Math.max(0, Math.min(insertIndex, appState.questions.length));
+    const newQuestion = createQuestion("New entry", "");
+    appState.questions.splice(boundedIndex, 0, newQuestion);
+
+    // Keep the current selection pointing at the same question it was on
+    if (boundedIndex <= appState.currentQuestionIndex && appState.questions.length > 1) {
+      appState.currentQuestionIndex++;
+    }
+
+    pendingRenameIndex = boundedIndex; // open the rename editor immediately
+    renderQuestionList();
+    refreshMarkButton();
+    refreshCounts();
+    persistSession();
   }
 
   /* ------------------------------------------------------------
@@ -1224,18 +1292,39 @@
       }
       rowElement.appendChild(bodyContainer);
 
-      /* Timestamp chip */
+      /* Timestamp chip — click to edit the time directly */
       const timestampChip = document.createElement("span");
       timestampChip.className = "question-row-timestamp " +
         (question.timestampMilliseconds === null ? "timestamp-empty" : "timestamp-set");
       timestampChip.textContent = question.timestampMilliseconds === null
         ? "— : — : —"
         : formatMilliseconds(question.timestampMilliseconds);
+      timestampChip.title = "Click to edit this time";
+      timestampChip.addEventListener("click", function (event) {
+        event.stopPropagation();
+        beginEditTimestamp(questionIndex, timestampChip, rowElement);
+      });
       rowElement.appendChild(timestampChip);
 
-      /* Row actions: rename / re-stamp / clear stamp / delete */
+      /* Row actions: insert above / insert below / rename / re-stamp / clear-or-delete */
       const actionsContainer = document.createElement("div");
       actionsContainer.className = "question-row-actions";
+
+      const insertAboveButton = makeRowActionButton("Insert a new entry ABOVE this one",
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="10" x2="12" y2="3"></line><polyline points="8 6 12 2 16 6"></polyline><line x1="4" y1="14" x2="20" y2="14"></line><line x1="4" y1="19" x2="20" y2="19"></line></svg>');
+      insertAboveButton.addEventListener("click", function (event) {
+        event.stopPropagation();
+        insertQuestionAt(questionIndex);
+      });
+      actionsContainer.appendChild(insertAboveButton);
+
+      const insertBelowButton = makeRowActionButton("Insert a new entry BELOW this one",
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="5" x2="20" y2="5"></line><line x1="4" y1="10" x2="20" y2="10"></line><line x1="12" y1="14" x2="12" y2="21"></line><polyline points="8 18 12 22 16 18"></polyline></svg>');
+      insertBelowButton.addEventListener("click", function (event) {
+        event.stopPropagation();
+        insertQuestionAt(questionIndex + 1);
+      });
+      actionsContainer.appendChild(insertBelowButton);
 
       const renameButton = makeRowActionButton("Rename",
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>');
@@ -1297,6 +1386,21 @@
 
       questionListElement.appendChild(rowElement);
     });
+
+    /* If an insert just happened, open the rename editor on the new row */
+    if (pendingRenameIndex !== null) {
+      const targetIndex = pendingRenameIndex;
+      pendingRenameIndex = null;
+      const targetRow = questionListElement.querySelector('[data-question-index="' + targetIndex + '"]');
+      if (targetRow) {
+        const targetNameElement = targetRow.querySelector(".question-row-name");
+        const targetBodyContainer = targetRow.querySelector(".question-row-body");
+        if (targetNameElement && targetBodyContainer) {
+          beginRenameQuestion(targetIndex, targetNameElement, targetBodyContainer);
+          targetRow.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
+      }
+    }
   }
 
   function makeRowActionButton(titleText, svgMarkup) {
@@ -1348,15 +1452,72 @@
   }
 
   /* ------------------------------------------------------------
+     Editing a timestamp's time directly
+     ------------------------------------------------------------ */
+  function beginEditTimestamp(questionIndex, timestampChip, rowElement) {
+    const question = appState.questions[questionIndex];
+    if (!question) return;
+
+    const editInput = document.createElement("input");
+    editInput.type = "text";
+    editInput.className = "timestamp-edit-input";
+    editInput.value = question.timestampMilliseconds === null
+      ? ""
+      : formatMilliseconds(question.timestampMilliseconds);
+    editInput.placeholder = "h:mm:ss";
+    editInput.spellcheck = false;
+
+    timestampChip.style.display = "none";
+    rowElement.insertBefore(editInput, timestampChip);
+    editInput.focus();
+    editInput.select();
+    editInput.addEventListener("click", function (event) { event.stopPropagation(); });
+
+    let editFinished = false;
+    function finishTimestampEdit(shouldCommit) {
+      if (editFinished) return;
+      editFinished = true;
+
+      if (shouldCommit) {
+        const typedText = editInput.value.trim();
+        if (typedText === "") {
+          // Blank clears the timestamp
+          question.timestampMilliseconds = null;
+        } else {
+          const parsedMilliseconds = parseTimeInputToMilliseconds(typedText);
+          if (parsedMilliseconds === null) {
+            showToast("Could not read that time — try 12:34 or 1:05:20");
+          } else {
+            question.timestampMilliseconds = parsedMilliseconds;
+          }
+        }
+      }
+
+      renderQuestionList();
+      refreshMarkButton();
+      refreshCounts();
+      refreshExportText();
+      persistSession();
+    }
+
+    editInput.addEventListener("keydown", function (event) {
+      if (event.key === "Enter") { event.preventDefault(); finishTimestampEdit(true); }
+      if (event.key === "Escape") { event.preventDefault(); finishTimestampEdit(false); }
+      event.stopPropagation();
+    });
+    editInput.addEventListener("blur", function () { finishTimestampEdit(true); });
+  }
+
+  /* ------------------------------------------------------------
      Counts, mark button, export
      ------------------------------------------------------------ */
   function refreshCounts() {
-    const totalQuestions = appState.questions.length;
-    const stampedQuestions = appState.questions.filter(function (question) {
+    const totalEntries = appState.questions.length;
+    const stampedEntries = appState.questions.filter(function (question) {
       return question.timestampMilliseconds !== null;
     }).length;
-    questionCountChip.textContent = totalQuestions + (totalQuestions === 1 ? " question" : " questions");
-    stampedCountChip.textContent = stampedQuestions + " stamped";
+    questionCountChip.textContent = totalEntries + (totalEntries === 1 ? " entry" : " entries");
+    stampedCountChip.textContent = stampedEntries + " stamped";
   }
 
   function refreshMarkButton() {
@@ -1399,13 +1560,22 @@
   }
 
   /* ------------------------------------------------------------
-     PDF question detection
+     PDF question + part detection
      ------------------------------------------------------------ */
   const QUESTION_START_PATTERNS = [
     /^Q\s?(\d{1,3})\b[\.\):]?\s*(.*)$/i,          // Q1, Q 1, Q1., Q1)
     /^Question\s+(\d{1,3})\b[\.\):]?\s*(.*)$/i,   // Question 1
     /^(\d{1,3})[\.\)]\s+(.*)$/                    // 1. text / 1) text
   ];
+
+  /* Part patterns: "(a) text" or "a) text" — letters only, kept strict
+     so stray words don't create false parts */
+  const PART_START_PATTERNS = [
+    /^\(([a-j])\)\s*(.*)$/i,   // (a) text
+    /^([a-j])\)\s+(.*)$/i      // a) text  (requires a space after the paren)
+  ];
+
+  const PART_LETTER_SEQUENCE = "abcdefghij";
 
   async function handlePdfFile(pdfFile) {
     if (!pdfFile) return;
@@ -1420,8 +1590,12 @@
       const arrayBuffer = await pdfFile.arrayBuffer();
       const pdfDocument = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
-      const detectedQuestions = [];
+      /* Sequential scan: track which question we are currently "inside"
+         so that detected parts attach to the right parent question. */
+      const scannedQuestions = [];        // { number, preview, parts: [{ letter, preview }] }
       const seenQuestionNumbers = new Set();
+      let currentScanTarget = null;       // the question object parts should attach to
+      const shouldDetectParts = detectPartsCheckbox.checked;
 
       for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber++) {
         setPdfStatus('<span class="spinner"></span>Scanning page ' + pageNumber + " of " + pdfDocument.numPages + "…");
@@ -1430,31 +1604,80 @@
         const lines = groupTextItemsIntoLines(textContent.items);
 
         lines.forEach(function (lineText) {
-          const match = matchQuestionStart(lineText);
-          if (!match) return;
-          const questionNumber = match.number;
-          // Avoid duplicates (answer keys, repeated headers). Keep the FIRST occurrence.
-          if (seenQuestionNumbers.has(questionNumber)) return;
-          seenQuestionNumbers.add(questionNumber);
-          detectedQuestions.push({
-            number: questionNumber,
-            preview: match.preview
-          });
+          /* 1) Is this line the start of a new question? */
+          const questionMatch = matchQuestionStart(lineText);
+          if (questionMatch) {
+            if (seenQuestionNumbers.has(questionMatch.number)) {
+              /* Duplicate (answer key / repeated header) — ignore it AND
+                 stop attaching parts until the next fresh question. */
+              currentScanTarget = null;
+              return;
+            }
+            seenQuestionNumbers.add(questionMatch.number);
+            const newScanQuestion = {
+              number: questionMatch.number,
+              preview: questionMatch.preview,
+              parts: []
+            };
+            scannedQuestions.push(newScanQuestion);
+            currentScanTarget = newScanQuestion;
+
+            /* A question line can itself begin part (a):  "5. (a) State…" */
+            if (shouldDetectParts) {
+              const inlinePartMatch = matchPartStart(questionMatch.preview);
+              if (inlinePartMatch && inlinePartMatch.letter === "a") {
+                newScanQuestion.parts.push({ letter: "a", preview: inlinePartMatch.preview });
+              }
+            }
+            return;
+          }
+
+          /* 2) Is this line the start of a part within the current question? */
+          if (!shouldDetectParts || !currentScanTarget) return;
+          const partMatch = matchPartStart(lineText);
+          if (!partMatch) return;
+
+          /* Only accept the NEXT expected letter (a → b → c …). This kills
+             false positives like "(d)" appearing inside body text, and
+             roman-numeral sub-parts like (i)/(ii) never match at all. */
+          const expectedLetter = PART_LETTER_SEQUENCE.charAt(currentScanTarget.parts.length);
+          if (partMatch.letter === expectedLetter) {
+            currentScanTarget.parts.push({ letter: partMatch.letter, preview: partMatch.preview });
+          }
         });
       }
 
-      detectedQuestions.sort(function (a, b) { return a.number - b.number; });
+      scannedQuestions.sort(function (a, b) { return a.number - b.number; });
 
-      if (detectedQuestions.length === 0) {
+      if (scannedQuestions.length === 0) {
         setPdfStatus("No question numbers detected — add questions manually below.", true);
         return;
       }
 
-      // Replace or append? If there are existing questions, confirm replacement.
+      /* Flatten: questions WITH parts expand into Q5(a), Q5(b), Q5(c);
+         questions with no parts stay as a single Q5 entry. */
+      const flattenedEntries = [];
+      scannedQuestions.forEach(function (scannedQuestion) {
+        if (scannedQuestion.parts.length === 0) {
+          flattenedEntries.push({
+            name: "Q" + scannedQuestion.number,
+            preview: scannedQuestion.preview
+          });
+        } else {
+          scannedQuestion.parts.forEach(function (part, partIndex) {
+            flattenedEntries.push({
+              name: "Q" + scannedQuestion.number + "(" + part.letter + ")",
+              preview: partIndex === 0 && !part.preview ? scannedQuestion.preview : part.preview
+            });
+          });
+        }
+      });
+
+      /* Replace or keep? If there are existing entries, confirm replacement. */
       if (appState.questions.length > 0) {
         const shouldReplace = window.confirm(
-          "Replace the current question list with " + detectedQuestions.length +
-          " questions detected from the PDF?\n\n(Cancel keeps your current list.)"
+          "Replace the current list with " + flattenedEntries.length +
+          " entries detected from the PDF?\n\n(Cancel keeps your current list.)"
         );
         if (!shouldReplace) {
           setPdfStatus("Kept existing list. PDF was not applied.");
@@ -1462,8 +1685,8 @@
         }
       }
 
-      appState.questions = detectedQuestions.map(function (detected) {
-        return createQuestion("Q" + detected.number, detected.preview);
+      appState.questions = flattenedEntries.map(function (entry) {
+        return createQuestion(entry.name, entry.preview);
       });
       appState.currentQuestionIndex = 0;
       appState.pdfFileName = pdfFile.name;
@@ -1474,8 +1697,12 @@
       refreshExportText();
       persistSession();
 
-      setPdfStatus("Loaded " + detectedQuestions.length + ' questions from "' + escapeHtml(pdfFile.name) + '"');
-      showToast(detectedQuestions.length + " questions ready to stamp");
+      const questionsWithParts = scannedQuestions.filter(function (q) { return q.parts.length > 0; }).length;
+      setPdfStatus(
+        "Loaded " + flattenedEntries.length + " entries (" + scannedQuestions.length +
+        " questions, " + questionsWithParts + " with parts) from \"" + escapeHtml(pdfFile.name) + "\""
+      );
+      showToast(flattenedEntries.length + " entries ready to stamp");
     } catch (error) {
       console.error("PDF parsing error:", error);
       setPdfStatus("Could not read that PDF — is it a valid, non-encrypted file?", true);
@@ -1531,6 +1758,20 @@
     return null;
   }
 
+  function matchPartStart(lineText) {
+    if (!lineText) return null;
+    for (let patternIndex = 0; patternIndex < PART_START_PATTERNS.length; patternIndex++) {
+      const match = lineText.match(PART_START_PATTERNS[patternIndex]);
+      if (match) {
+        return {
+          letter: match[1].toLowerCase(),
+          preview: (match[2] || "").trim().slice(0, 80)
+        };
+      }
+    }
+    return null;
+  }
+
   function setPdfStatus(htmlText, isError) {
     pdfStatusLine.innerHTML = htmlText;
     pdfStatusLine.classList.toggle("pdf-status-error", !!isError);
@@ -1543,7 +1784,8 @@
   }
 
   /* ------------------------------------------------------------
-     Manual add
+     Manual add (appends at the end; use row hover buttons to
+     insert above/below a specific slot)
      ------------------------------------------------------------ */
   function addManualQuestion() {
     const rawName = manualAddInput.value.trim();
